@@ -252,7 +252,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Fields on each pane's top edge. Status and name are on; the rest are off,
 # matching the current name-only titles. Turn them on from Settings → pane
 # labels, or here. Status is the agent's mark before its name: a spinner while
-# it works, a dot once it finishes, which a click turns into a check.
+# it works, a blinking dot once it finishes, which a click turns into a steady check.
+# The pending dot blinks even in the focused pane, in sync with tab attention.
 # usage is off until you set it true.
 # [ui.pane_header]
 # status = true
