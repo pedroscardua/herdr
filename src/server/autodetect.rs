@@ -95,6 +95,16 @@ fn validate_running_server_compatibility() -> io::Result<()> {
     if status.protocol == Some(crate::protocol::PROTOCOL_VERSION) {
         return Ok(());
     }
+    // Machine mode has an explicit adapter for the published motionharvest
+    // protocol 12. Reuse those live local sessions without stopping their panes.
+    if status.protocol == Some(12)
+        && crate::machine::Catalog::load()?
+            .machines
+            .iter()
+            .any(|m| m.enabled)
+    {
+        return Ok(());
+    }
 
     Err(io::Error::other(format!(
         "Herdr was updated, but this session is still running the old server.\n\nserver: v{} protocol {}\nclient: v{} protocol {}\n\n{}",

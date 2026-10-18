@@ -3,6 +3,27 @@ title: CLI reference
 description: Herdr commands for sessions, workspaces, tabs, panes, agents, waits, integrations, and status.
 ---
 
+## Saved SSH machines
+
+```bash
+herdr machine add VM223 --label "VM 223" --install
+herdr machine add HomeVMCodex --label HomeVMCodex --install
+herdr machine list --json
+herdr machine status --json
+herdr machine reconnect "VM 223"
+herdr machine rename "VM 223" --label "Build VM"
+herdr machine disable "Build VM"
+herdr machine enable "Build VM"
+herdr machine remove "Build VM"
+```
+
+`add` also accepts `--remote-session NAME` (default `motionharvest`) and
+`--binary PATH` with `--install` for a custom binary compiled for the remote platform.
+Profiles are scoped to the config file's directory. Reopen the client after the
+first addition, then use the bottom machine bar or Ctrl+Alt+M to switch.
+See [Connecting machines](/docs/preview/connecting-machines/) for installation,
+isolation, reconnect behavior and current boundaries.
+
 Herdr’s CLI talks to the running server over the same local socket API used by integrations and agents.
 
 Most commands print JSON responses. Use them from scripts when you want deterministic automation.

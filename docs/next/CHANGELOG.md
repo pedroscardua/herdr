@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Saved SSH machines in the motionharvest client: `machine add/list/status/reconnect/rename/enable/disable/remove`, a clickable machine bar, and Ctrl+Alt+M to switch between Local and remote Linux/macOS spaces in one window. Connections and notifications remain independent, unavailable hosts retry in the background, and input never targets disconnected cached screens. Explicit `--install` provisions a checksum-verified motionharvest binary and a separate remote session without replacing official Herdr installations.
+
 ### Fixed
 - Ctrl+clicking a URL in a pane opens it once from herdr. The release of that click used to reach the pane, so a program in the pane that opens links on click, such as Claude Code, opened the same URL a second time.
 - In Black Box, a Ctrl+clicked URL also stopped opening a third time from Black Box itself. herdr sets Black Box's `vte.ext.blackbox.app-opens-links` terminal property while it runs and clears it on exit, and Black Box leaves Ctrl+clicked links to herdr while it is set.
