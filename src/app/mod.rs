@@ -2903,6 +2903,56 @@ mod tests {
     }
 
     #[test]
+    fn settings_acknowledge_on_pane_focus_saves_and_applies_both_ways() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("settings-acknowledge-on-pane-focus");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "onboarding = false\n[ui]\nconfirm_close = false\n").unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0]
+            .pane_state_mut(pane_id)
+            .unwrap()
+            .seen = false;
+        app.state.mode = Mode::Settings;
+        app.state.settings.section = state::SettingsSection::Experiments;
+        app.state.settings.list.selected = state::ExperimentSetting::ALL
+            .iter()
+            .position(|setting| *setting == state::ExperimentSetting::AcknowledgeOnPaneFocus)
+            .unwrap();
+        assert!(!app.state.acknowledge_on_pane_focus);
+        for enabled in [true, false] {
+            if enabled {
+                app.handle_settings_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+            } else {
+                app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 120, 40);
+                let area = app.state.settings_content_rect();
+                app.handle_mouse(crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left,
+                    ),
+                    column: area.x + 2,
+                    row: area.y
+                        + crate::ui::EXPERIMENTS_CHECKBOX_ROWS_OFFSET
+                        + app.state.settings.list.selected as u16,
+                    modifiers: KeyModifiers::empty(),
+                });
+            }
+            assert_eq!(app.state.acknowledge_on_pane_focus, enabled);
+            let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(saved.ui.acknowledge_on_pane_focus, enabled);
+            assert!(!saved.ui.confirm_close);
+            assert!(!app.state.workspaces[0].pane_state(pane_id).unwrap().seen);
+            assert!(app.state.config_diagnostic.is_none());
+        }
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn acknowledge_on_focus_config_loads_and_reloads_without_confirming_a_pane() {
         let mut config = Config::default();
         config.ui.acknowledge_on_pane_focus = true;

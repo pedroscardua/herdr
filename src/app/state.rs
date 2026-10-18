@@ -1193,13 +1193,15 @@ pub(crate) enum ExperimentSetting {
     SwitchAsciiInputSourceInPrefix,
     RefreshSummaryWithGrok,
     HideAttachedAgents,
+    AcknowledgeOnPaneFocus,
 }
 
 impl ExperimentSetting {
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::PaneHistory,
         Self::SwitchAsciiInputSourceInPrefix,
         Self::HideAttachedAgents,
+        Self::AcknowledgeOnPaneFocus,
         Self::RefreshSummaryWithGrok,
     ];
 
@@ -1211,6 +1213,7 @@ impl ExperimentSetting {
             }
             Self::RefreshSummaryWithGrok => "refresh summary with grok",
             Self::HideAttachedAgents => "agent list: only agents not in a space",
+            Self::AcknowledgeOnPaneFocus => "acknowledge completion on pane focus",
         }
     }
 
@@ -1222,6 +1225,7 @@ impl ExperimentSetting {
             }
             Self::RefreshSummaryWithGrok => state.refresh_summary_with_grok(),
             Self::HideAttachedAgents => state.hide_attached_agents(),
+            Self::AcknowledgeOnPaneFocus => state.acknowledge_on_pane_focus,
         }
     }
 }
