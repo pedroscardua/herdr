@@ -10,6 +10,7 @@ use crate::api::schema::{
 
 mod agent;
 mod integration;
+mod machine;
 mod pane;
 mod server;
 mod shell_init;
@@ -37,6 +38,7 @@ pub fn maybe_run(args: &[String]) -> std::io::Result<CommandOutcome> {
             exit_code
         }
         "status" => status::run_status_command(&args[2..])?,
+        "machine" => machine::run(&args[2..])?,
         "config" => run_config_command(&args[2..])?,
         "channel" => run_channel_command(&args[2..])?,
         "workspace" => workspace::run_workspace_command(&args[2..])?,

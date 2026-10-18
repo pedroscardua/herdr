@@ -42,6 +42,7 @@ mod ipc;
 mod kitty_graphics;
 mod layout;
 mod logging;
+mod machine;
 mod pane;
 mod pane_names;
 mod persist;
@@ -510,6 +511,7 @@ fn main() -> io::Result<()> {
         println!("       herdr worktree <subcommand> ...");
         println!("       herdr tab <subcommand> ...");
         println!("       herdr view <part> [show|hide|toggle] ...");
+        println!("       herdr machine <subcommand> ...  # saved SSH machines in one window");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
         println!("       herdr wait <subcommand> ...");

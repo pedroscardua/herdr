@@ -1,0 +1,97 @@
+---
+title: Connecting machines
+description: Use Local and Linux or macOS SSH machines in one motionharvest Herdr window.
+---
+
+Save an SSH machine, then switch between Local and remote work in one window.
+Each machine owns its spaces, panes, agents, files and processes. Creating a space
+on a selected VM asks for a directory on that VM. No network filesystem mount is needed.
+
+## Setup
+
+First verify ordinary SSH access. Targets may be SSH config aliases, `user@host`,
+or `ssh://user@host:port`. SSH aliases cannot contain spaces; display labels can.
+
+```bash
+ssh VM223
+herdr machine add VM223 --label "VM 223" --install
+herdr machine add HomeVMCodex --label "HomeVMCodex" --install
+herdr
+```
+
+For a separately installed fork named `herdr2`, substitute `herdr2` in these commands.
+Profiles are saved next to that invocation's config file as `ssh-machines.json`.
+In particular, `HERDR_CONFIG_PATH` keeps the official Herdr and this fork's profiles separate.
+
+`--install` explicitly allows installation of the matching **motionharvest** release.
+Setup downloads the asset for the remote platform from `motionharvest/herdr` on
+GitHub and verifies its SHA-256 digest. It does not download an official Herdr
+release with the same version number: the projects have separate version histories.
+
+The remote fork is installed at `~/.local/lib/herdr-motionharvest/herdr`, uses
+`~/.config/herdr-motionharvest/config.toml`, and defaults to the named session
+`motionharvest`. It leaves the official `~/.local/bin/herdr` and its sessions alone.
+Setup verifies a real client/server handshake before saving a machine.
+The client supports the published release's protocol 12 and current main's
+protocol 13, including existing local fork sessions, without restarting their panes.
+
+Use `--remote-session NAME` for a different remote session. For a custom build,
+pass `--binary /local/path/to/herdr` together with `--install`. This must be a
+binary compiled for the **remote** operating system and architecture, not the local Mac.
+Without `--install`, setup requires an existing matching isolated installation.
+Linux and macOS hosts on x86_64 and aarch64 are supported.
+
+## Switch and reconnect
+
+After adding the first machine, reopen the fork's client. A machine bar appears
+at the bottom. Click a label, use the wheel over that bar, or press **Ctrl+Alt+M**
+to cycle. On narrow terminals, the bar scrolls to keep the selected machine visible;
+the shortcut and wheel can reach labels outside the visible area.
+
+The spaces sidebar and agent table belong to the selected machine. Other machines
+keep their processes and connections running. `+` marks a notification from a
+machine you are not viewing; `~` means connecting and `!` means an error.
+Disconnected machines show an error instead of an interactive cached screen.
+Local remains selectable while a VM is connecting or unavailable.
+
+Connections retry automatically with a bounded delay. Background retries use
+noninteractive SSH, never install a binary and never stop a remote server.
+If authentication needs attention, use a separate terminal:
+
+```bash
+ssh-add
+herdr machine reconnect "VM 223"
+herdr machine status --json
+```
+
+Authentication stays with OpenSSH; Herdr does not store passwords or private keys.
+If an unknown host key needs confirmation, complete ordinary `ssh <alias>` first.
+
+## Manage saved hosts
+
+```bash
+herdr machine list --json
+herdr machine rename "VM 223" --label "Build VM"
+herdr machine disable "Build VM"
+herdr machine enable "Build VM"
+herdr machine remove "Build VM"
+```
+
+IDs from `machine list` can replace labels. Renames, additions, enable/disable and
+removal reload within a second in an already running multi-machine client.
+Removing the selected machine returns to Local. These operations disconnect the
+client without stopping remote panes. Repeating `machine add` for the same label,
+target and session updates its saved entry rather than creating a duplicate.
+
+## Current boundaries
+
+This integration keeps motionharvest's server-rendered interface and wire protocol.
+It does not import the official project's combined cross-machine workspace sidebar
+or combined agent table. Machine switching selects a complete, independent interface.
+CLI commands run inside each pane use that pane's server; selecting another machine
+does not retarget commands in a previously opened local shell.
+
+Multi-machine mode uses semantic text frames. Kitty graphics and remote Black Box
+pop-out windows are unavailable in this mode. Clipboard text and image paste keep
+using the existing client/server bridge. Remote actions use that server's keybindings.
+The single-machine `--remote` and direct terminal attach paths remain available.

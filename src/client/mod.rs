@@ -13,6 +13,8 @@
 //! - Displays sound/toast notifications forwarded from server
 
 mod input;
+mod machine_handshake;
+mod machines;
 
 use std::collections::HashSet;
 use std::io::{self, Write as _};
@@ -489,6 +491,7 @@ fn do_handshake(
 
 /// Internal events for the client event loop.
 enum ClientLoopEvent {
+    Machine(machines::Event),
     /// Raw input bytes from stdin.
     StdinInput(Vec<u8>),
     /// Terminal resize detected.
@@ -506,12 +509,31 @@ enum ClientLoopEvent {
 ///
 /// This is the entry point called from `main.rs` when running in client mode.
 pub fn run_client() -> io::Result<()> {
+    // Explicit --remote clients and direct attaches keep their existing transport.
+    if std::env::var_os(crate::remote::REMOTE_KEYBINDINGS_ENV_VAR).is_none()
+        && crate::machine::Catalog::load()?
+            .machines
+            .iter()
+            .any(|m| m.enabled)
+    {
+        return machines::run();
+    }
     run_client_with_mode(
         requested_render_encoding(),
         None,
         None,
         "connecting to server",
     )
+}
+
+pub(crate) fn verify_machine(machine: &crate::machine::Machine) -> io::Result<()> {
+    let (mut stream, tunnel) = crate::machine::ssh::connect(machine)?;
+    let result = machine_handshake::handshake(&mut stream, machine.protocol, 80, 23)
+        .map_err(|e| io::Error::other(format!("{e}: {}", tunnel.error())));
+    if result.is_ok() {
+        let _ = write_to_server(&mut stream, &ClientMessage::Detach);
+    }
+    result.map(|_| ())
 }
 
 /// Runs a direct terminal attach client.
@@ -751,6 +773,7 @@ async fn run_client_loop(
         };
 
         match event {
+            ClientLoopEvent::Machine(_) => {}
             ClientLoopEvent::StdinInput(data) => {
                 let data = if let Some(attach_escape) = &mut state.attach_escape {
                     match attach_escape.filter_input(
