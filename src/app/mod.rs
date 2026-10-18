@@ -562,6 +562,7 @@ impl App {
             mouse_scroll_lines: config.ui.mouse_scroll_lines(),
             confirm_close: config.ui.confirm_close,
             prompt_new_tab_name: config.ui.prompt_new_tab_name,
+            acknowledge_on_pane_focus: config.ui.acknowledge_on_pane_focus,
             nerd_font: config.ui.nerd_font,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             pane_header: config.ui.pane_header,
@@ -1317,6 +1318,7 @@ impl App {
                 config.ui.right_click_passthrough_modifiers();
             self.state.confirm_close = config.ui.confirm_close;
             self.state.prompt_new_tab_name = config.ui.prompt_new_tab_name;
+            self.state.acknowledge_on_pane_focus = config.ui.acknowledge_on_pane_focus;
             self.state.nerd_font = config.ui.nerd_font;
             self.state.show_agent_labels_on_pane_borders =
                 config.ui.show_agent_labels_on_pane_borders;
@@ -2898,6 +2900,47 @@ mod tests {
             ));
             assert!(app.state.commander.paragraph.is_none());
         }
+    }
+
+    #[test]
+    fn acknowledge_on_focus_config_loads_and_reloads_without_confirming_a_pane() {
+        let mut config = Config::default();
+        config.ui.acknowledge_on_pane_focus = true;
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+        assert!(app.state.acknowledge_on_pane_focus);
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("acknowledge-on-focus-reload");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.workspaces[0].tabs[0]
+            .panes
+            .values_mut()
+            .next()
+            .unwrap()
+            .seen = false;
+        for enabled in [true, false] {
+            std::fs::write(
+                &path,
+                format!("[ui]\nacknowledge_on_pane_focus = {enabled}\n"),
+            )
+            .unwrap();
+            app.reload_config();
+            assert_eq!(app.state.acknowledge_on_pane_focus, enabled);
+            assert!(
+                !app.state.workspaces[0].tabs[0]
+                    .panes
+                    .values()
+                    .next()
+                    .unwrap()
+                    .seen
+            );
+        }
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
