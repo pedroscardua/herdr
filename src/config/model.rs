@@ -105,6 +105,7 @@ fn parse_right_click_passthrough_modifier(value: &str) -> Option<Option<KeyModif
 #[derive(Debug, Clone)]
 pub struct ToastConfig {
     pub delivery: ToastDelivery,
+    pub delay_seconds: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -391,6 +392,10 @@ pub struct UiConfig {
     pub confirm_close: bool,
     /// Ask for a tab name before creating a new tab. Default: true.
     pub prompt_new_tab_name: bool,
+    /// Acknowledge a finished agent when its pane is focused. Default: false.
+    pub acknowledge_on_pane_focus: bool,
+    /// Start new tabs with their sidebar layout preview folded. Default: false.
+    pub minimap_collapsed_by_default: bool,
     /// Use Nerd Font glyphs in optional UI chrome. Default: false.
     pub nerd_font: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
@@ -641,6 +646,8 @@ impl Default for UiConfig {
             mouse_scroll_lines: None,
             confirm_close: true,
             prompt_new_tab_name: true,
+            acknowledge_on_pane_focus: false,
+            minimap_collapsed_by_default: false,
             nerd_font: false,
             show_agent_labels_on_pane_borders: true,
             pane_header: PaneHeaderConfig::default(),
@@ -878,6 +885,7 @@ impl Default for ToastConfig {
     fn default() -> Self {
         Self {
             delivery: ToastDelivery::Off,
+            delay_seconds: 1,
         }
     }
 }
@@ -890,6 +898,7 @@ impl<'de> Deserialize<'de> for ToastConfig {
         #[derive(Deserialize, Default)]
         #[serde(default)]
         struct RawToastConfig {
+            delay_seconds: Option<u64>,
             delivery: Option<ToastDelivery>,
             enabled: Option<bool>,
         }
@@ -900,7 +909,17 @@ impl<'de> Deserialize<'de> for ToastConfig {
             Some(false) | None => ToastDelivery::Off,
         };
         let delivery = raw.delivery.unwrap_or(legacy_delivery);
-        Ok(Self { delivery })
+        let delay_seconds = raw.delay_seconds.unwrap_or(1);
+        if delay_seconds > crate::config::MAX_TOAST_DELAY_SECONDS {
+            return Err(serde::de::Error::custom(format!(
+                "ui.toast.delay_seconds must be between 0 and {}",
+                crate::config::MAX_TOAST_DELAY_SECONDS
+            )));
+        }
+        Ok(Self {
+            delivery,
+            delay_seconds,
+        })
     }
 }
 
@@ -915,6 +934,24 @@ impl Default for AdvancedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_delay_defaults_to_one_second_and_keeps_legacy_toast_config() {
+        assert_eq!(ToastConfig::default().delay_seconds, 1);
+        for config in ["", "enabled = true", "delivery = \"terminal\""] {
+            let parsed: ToastConfig = toml::from_str(config).unwrap();
+            assert_eq!(parsed.delay_seconds, 1);
+        }
+        let legacy: ToastConfig = toml::from_str("enabled = true").unwrap();
+        assert_eq!(legacy.delivery, ToastDelivery::Herdr);
+        for delay in [0, 1, crate::config::MAX_TOAST_DELAY_SECONDS] {
+            let parsed: ToastConfig = toml::from_str(&format!("delay_seconds = {delay}")).unwrap();
+            assert_eq!(parsed.delay_seconds, delay);
+        }
+        for delay in ["-1", "3601", "18446744073709551615", "1.5"] {
+            assert!(toml::from_str::<ToastConfig>(&format!("delay_seconds = {delay}")).is_err());
+        }
+    }
 
     #[test]
     fn update_channel_defaults_stable_and_parses() {
@@ -1107,6 +1144,30 @@ directory = "~/Projects/herdr-worktrees"
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.worktrees.directory, "~/Projects/herdr-worktrees");
     }
+
+    #[test]
+    fn minimap_collapsed_by_default_is_opt_in() {
+        assert!(!Config::default().ui.minimap_collapsed_by_default);
+        for collapsed in [false, true] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\nminimap_collapsed_by_default = {collapsed}\n"
+            ))
+            .unwrap();
+            assert_eq!(config.ui.minimap_collapsed_by_default, collapsed);
+        }
+    }
+
+    #[test]
+    fn acknowledge_on_pane_focus_defaults_off_and_parses() {
+        let absent: Config = toml::from_str("[ui]\nprompt_new_tab_name = false").unwrap();
+        assert!(!absent.ui.acknowledge_on_pane_focus);
+        for enabled in [false, true] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\nacknowledge_on_pane_focus = {enabled}")).unwrap();
+            assert_eq!(config.ui.acknowledge_on_pane_focus, enabled);
+        }
+    }
+
     #[test]
     fn prompt_new_tab_name_defaults_on_and_parses() {
         let default_config = Config::default();

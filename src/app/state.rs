@@ -1193,13 +1193,15 @@ pub(crate) enum ExperimentSetting {
     SwitchAsciiInputSourceInPrefix,
     RefreshSummaryWithGrok,
     HideAttachedAgents,
+    AcknowledgeOnPaneFocus,
 }
 
 impl ExperimentSetting {
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::PaneHistory,
         Self::SwitchAsciiInputSourceInPrefix,
         Self::HideAttachedAgents,
+        Self::AcknowledgeOnPaneFocus,
         Self::RefreshSummaryWithGrok,
     ];
 
@@ -1211,6 +1213,7 @@ impl ExperimentSetting {
             }
             Self::RefreshSummaryWithGrok => "refresh summary with grok",
             Self::HideAttachedAgents => "agent list: only agents not in a space",
+            Self::AcknowledgeOnPaneFocus => "acknowledge completion on pane focus",
         }
     }
 
@@ -1222,6 +1225,7 @@ impl ExperimentSetting {
             }
             Self::RefreshSummaryWithGrok => state.refresh_summary_with_grok(),
             Self::HideAttachedAgents => state.hide_attached_agents(),
+            Self::AcknowledgeOnPaneFocus => state.acknowledge_on_pane_focus,
         }
     }
 }
@@ -1959,6 +1963,9 @@ pub struct AppState {
     pub update_dismissed: bool,
     pub config_diagnostic: Option<String>,
     pub toast: Option<ToastNotification>,
+    pub(crate) pending_agent_notifications:
+        std::collections::HashMap<PaneId, super::notifications::PendingAgentNotification>,
+    pub(crate) ready_agent_notifications: Vec<super::notifications::AgentNotificationDelivery>,
     pub copy_feedback: Option<CopyFeedback>,
     /// Last reported focus state for the outer terminal hosting herdr.
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
@@ -1979,6 +1986,9 @@ pub struct AppState {
     pub mouse_scroll_lines: usize,
     pub confirm_close: bool,
     pub prompt_new_tab_name: bool,
+    pub acknowledge_on_pane_focus: bool,
+    /// Initial sidebar preview state for new tabs; restored tabs keep their saved state.
+    pub minimap_collapsed_by_default: bool,
     pub nerd_font: bool,
     pub show_agent_labels_on_pane_borders: bool,
     pub pane_header: PaneHeaderConfig,
@@ -2424,6 +2434,8 @@ impl AppState {
             update_dismissed: false,
             config_diagnostic: None,
             toast: None,
+            pending_agent_notifications: Default::default(),
+            ready_agent_notifications: Vec::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
             prefix_code: KeyCode::Char('b'),
@@ -2437,6 +2449,8 @@ impl AppState {
             mouse_scroll_lines: crate::config::DEFAULT_MOUSE_SCROLL_LINES,
             confirm_close: true,
             prompt_new_tab_name: true,
+            acknowledge_on_pane_focus: false,
+            minimap_collapsed_by_default: false,
             nerd_font: false,
             show_agent_labels_on_pane_borders: true,
             pane_header: PaneHeaderConfig::default(),

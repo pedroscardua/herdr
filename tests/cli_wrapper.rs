@@ -2851,7 +2851,7 @@ fn pane_shell_gets_herdr_socket_and_pane_env() {
 }
 
 #[test]
-fn wait_agent_status_exits_when_idle_status_matches() {
+fn wait_agent_status_exits_when_a_finish_reports_done() {
     let base = unique_test_dir();
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
@@ -2903,7 +2903,7 @@ fn wait_agent_status_exits_when_idle_status_matches() {
             "agent-status",
             "1-1",
             "--status",
-            "idle",
+            "done",
             "--timeout",
             "5000",
         ],
@@ -2915,7 +2915,7 @@ fn wait_agent_status_exits_when_idle_status_matches() {
     );
     let waited_json: serde_json::Value = serde_json::from_slice(&waited.stdout).unwrap();
     assert_eq!(waited_json["event"], "pane.agent_status_changed");
-    assert_eq!(waited_json["data"]["agent_status"], "idle");
+    assert_eq!(waited_json["data"]["agent_status"], "done");
     assert_eq!(waited_json["data"]["agent"], "pi");
 
     cleanup_spawned_herdr(herdr, base);

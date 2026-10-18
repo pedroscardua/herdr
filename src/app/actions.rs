@@ -13,7 +13,7 @@ use unicode_width::UnicodeWidthChar;
 
 use super::state::{
     text_matches_query, AppState, Mode, NavigatorRow, NavigatorStateFilter, NavigatorTarget,
-    PaneFocusTarget, ToastKind, ToastNotification, ToastTarget, ViewLayout,
+    PaneFocusTarget, ToastKind, ToastNotification, ViewLayout,
 };
 
 /// Only `Working -> Idle` is a completion. `Blocked -> Idle` is a dialog being
@@ -71,7 +71,7 @@ pub fn notification_toast_for_state_change(
     }
 }
 
-fn toast_agent_label(agent_label: &str) -> &str {
+pub(super) fn toast_agent_label(agent_label: &str) -> &str {
     agent_label
 }
 
@@ -169,10 +169,13 @@ impl AppState {
             pane_id,
         };
         if previous.as_ref() == Some(&target) {
+            self.acknowledge_completion_on_focus(pane_id);
             return false;
         }
 
-        self.switch_workspace_tab(ws_idx, tab_idx);
+        // Selecting the tab is an intermediate step: only acknowledge the
+        // requested pane, not the pane that was focused in that tab before.
+        self.switch_workspace_tab_without_acknowledgement(ws_idx, tab_idx);
         if let Some(tab) = self
             .workspaces
             .get_mut(ws_idx)
@@ -180,6 +183,7 @@ impl AppState {
         {
             tab.layout.focus_pane(pane_id);
             self.previous_pane_focus = previous;
+            self.acknowledge_completion_on_focus(pane_id);
             self.mark_session_dirty();
             return true;
         }
@@ -820,11 +824,28 @@ impl AppState {
                 ws.switch_tab(active_tab);
             }
             self.record_pane_focus_after_navigation(previous_focus);
+            if let Some(target) = self.current_pane_focus_target() {
+                self.acknowledge_completion_on_focus(target.pane_id);
+            }
         }
     }
 
     /// Focus a space, and the pane the table row points at within it.
     pub(crate) fn switch_workspace_tab(&mut self, ws_idx: usize, tab_idx: usize) -> bool {
+        if !self.switch_workspace_tab_without_acknowledgement(ws_idx, tab_idx) {
+            return false;
+        }
+        if let Some(target) = self.current_pane_focus_target() {
+            self.acknowledge_completion_on_focus(target.pane_id);
+        }
+        true
+    }
+
+    fn switch_workspace_tab_without_acknowledgement(
+        &mut self,
+        ws_idx: usize,
+        tab_idx: usize,
+    ) -> bool {
         if ws_idx >= self.workspaces.len() {
             return false;
         }
@@ -1004,9 +1025,42 @@ impl AppState {
         self.outer_terminal_focus == Some(false)
     }
 
+    /// A focus action confirms a pending completion only when explicitly enabled.
+    /// This is idempotent: focusing an acknowledged pane never unchecks it.
+    fn acknowledge_completion_on_focus(&mut self, pane_id: PaneId) {
+        if !self.acknowledge_on_pane_focus {
+            return;
+        }
+        let pane = self
+            .workspaces
+            .iter_mut()
+            .flat_map(|ws| ws.tabs.iter_mut())
+            .find_map(|tab| tab.panes.get_mut(&pane_id))
+            .or_else(|| {
+                self.detached_agents
+                    .iter_mut()
+                    .find(|agent| agent.pane_id == pane_id)
+                    .map(|agent| &mut agent.pane)
+            });
+        let Some(pane) = pane else {
+            return;
+        };
+        if pane.seen
+            || !self
+                .terminals
+                .get(&pane.attached_terminal_id)
+                .is_some_and(|terminal| terminal.state == AgentState::Idle)
+        {
+            return;
+        }
+        pane.seen = true;
+        pane.completed = true;
+        self.mark_session_dirty();
+    }
+
     /// Toggle the done marker on one agent: the dot becomes a check, the check
-    /// becomes a dot. That is the only click that moves it, and it does not
-    /// also jump to the agent. A later run that finishes puts the dot back on
+    /// becomes a dot, without also jumping to the agent. Focus actions may
+    /// confirm it separately when enabled. A later run puts the dot back on
     /// its own, so a check earned on the last task does not pretend this one
     /// was looked at.
     pub(crate) fn toggle_agent_completion_acknowledgement(&mut self, pane_id: PaneId) -> bool {
@@ -1402,7 +1456,7 @@ impl AppState {
         render_notify: std::sync::Arc<tokio::sync::Notify>,
         render_dirty: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) {
-        let workspace = crate::workspace::Workspace::from_existing_pane(
+        let mut workspace = crate::workspace::Workspace::from_existing_pane(
             pane_id,
             pane_state,
             identity_cwd,
@@ -1410,6 +1464,7 @@ impl AppState {
             render_notify,
             render_dirty,
         );
+        workspace.tabs[0].layout_preview_hidden = self.minimap_collapsed_by_default;
         let workspace_id = workspace.id.clone();
         self.workspaces.push(workspace);
         let new_idx = self.workspaces.len() - 1;
@@ -1554,6 +1609,7 @@ impl AppState {
 
         if self.active == Some(ws_idx) && self.workspaces[ws_idx].focused_pane_id() == Some(pane_id)
         {
+            self.acknowledge_completion_on_focus(pane_id);
             self.ensure_agent_panel_entry_visible(idx);
             return true;
         }
@@ -2104,7 +2160,7 @@ impl AppState {
             return;
         }
 
-        self.switch_workspace_tab(ws_idx, tab_idx);
+        self.switch_workspace_tab_without_acknowledgement(ws_idx, tab_idx);
         if let Some(tab) = self
             .workspaces
             .get_mut(ws_idx)
@@ -2112,6 +2168,7 @@ impl AppState {
         {
             tab.layout.focus_pane(target.pane_id);
             self.previous_pane_focus = current;
+            self.acknowledge_completion_on_focus(target.pane_id);
             self.mark_session_dirty();
         }
     }
@@ -2313,6 +2370,7 @@ impl AppState {
     /// change. Calling this again for the same pane leaves the overlay in place.
     pub(crate) fn peek_agent(&mut self, pane_id: PaneId) {
         self.agent_peek = Some(pane_id);
+        self.acknowledge_completion_on_focus(pane_id);
         self.mode = Mode::Terminal;
     }
 
@@ -3262,13 +3320,6 @@ impl AppState {
         change: &EffectiveStateChange,
         update_marker: bool,
     ) -> Option<bool> {
-        let is_active_tab = self.pane_is_in_active_tab(ws_idx, pane_id);
-        let suppress_active_tab_notifications = active_tab_suppresses_notifications(
-            is_active_tab,
-            self.outer_terminal_focus,
-            self.notify_active_tab,
-        );
-        let suppress_active_tab_toast = is_active_tab && !self.notify_active_tab;
         let pane = self.workspaces[ws_idx]
             .tabs
             .iter_mut()
@@ -3290,56 +3341,13 @@ impl AppState {
             self.mark_session_dirty();
         }
 
-        if self.local_sound_playback && self.sound.allows(change.known_agent) {
-            if let Some(sound) = notification_sound_for_state_change(
-                suppress_active_tab_notifications,
-                change.previous_state,
-                change.state,
-            ) {
-                crate::sound::play(sound, &self.sound);
-            }
-        }
-
-        if matches!(
-            self.toast_config.delivery,
-            crate::config::ToastDelivery::Herdr
-        ) {
-            if let (Some(agent_label), Some(kind)) = (
-                change.agent_label.as_deref(),
-                notification_toast_for_state_change(
-                    suppress_active_tab_toast,
-                    change.previous_state,
-                    change.state,
-                ),
-            ) {
-                let event_text = match kind {
-                    ToastKind::NeedsAttention => "needs attention",
-                    ToastKind::Finished => "finished",
-                    ToastKind::UpdateInstalled => "updated",
-                };
-                let workspace_label = self.workspaces[ws_idx].display_name();
-                let context = notification_context(
-                    &self.workspaces[ws_idx],
-                    &workspace_label,
-                    ws_idx,
-                    pane_id,
-                );
-                self.toast = Some(ToastNotification {
-                    kind,
-                    title: format!("{} {}", toast_agent_label(agent_label), event_text),
-                    context,
-                    target: Some(ToastTarget {
-                        workspace_id: self.workspaces[ws_idx].id.clone(),
-                        pane_id,
-                    }),
-                });
-            }
-        }
+        self.record_agent_notification(ws_idx, pane_id, change);
 
         Some(seen)
     }
 
     fn handle_pane_died(&mut self, pane_id: PaneId) {
+        self.pending_agent_notifications.remove(&pane_id);
         let ws_idx = self
             .workspaces
             .iter()
@@ -3416,6 +3424,8 @@ mod tests {
 
     fn app_with_workspaces(names: &[&str]) -> AppState {
         let mut state = AppState::test_new();
+        // These marker/transition tests exercise immediate delivery explicitly.
+        state.toast_config.delay_seconds = 0;
         for name in names {
             let ws = Workspace::test_new(name);
             state.workspaces.push(ws);
@@ -3426,6 +3436,16 @@ mod tests {
             state.mode = Mode::Terminal;
         }
         state
+    }
+
+    #[test]
+    fn moving_a_pane_to_a_new_space_uses_minimap_default() {
+        let mut state = app_with_workspaces(&["source"]);
+        let pane = state.workspaces[0].test_split(Direction::Horizontal);
+        state.minimap_collapsed_by_default = true;
+        assert!(state.promote_pane_to_new_workspace(pane));
+        assert!(state.workspaces[1].tabs[0].layout_preview_hidden);
+        assert!(!state.workspaces[0].tabs[0].layout_preview_hidden);
     }
 
     fn mark_linked_worktree(state: &mut AppState, ws_idx: usize) {
@@ -4490,6 +4510,131 @@ mod tests {
         assert_eq!(state.workspaces[1].focused_pane_id(), Some(second_tab_root));
         assert_ne!(second_first_root, second_tab_root);
     }
+
+    fn pending_focus_state() -> (AppState, PaneId, PaneId) {
+        let mut state = app_with_workspaces(&["source", "destination"]);
+        let first = state.workspaces[1].tabs[0].root_pane;
+        let second = state.workspaces[1].test_split(Direction::Horizontal);
+        state.workspaces[1].tabs[0].layout.focus_pane(first);
+        state.ensure_test_terminals();
+        for pane_id in [first, second] {
+            let pane = state.workspaces[1].pane_state_mut(pane_id).unwrap();
+            pane.seen = false;
+            pane.completed = true;
+            let terminal_id = pane.attached_terminal_id.clone();
+            state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .set_detected_state(Some(Agent::Codex), AgentState::Idle);
+        }
+        (state, first, second)
+    }
+
+    #[test]
+    fn acknowledge_on_focus_is_opt_in() {
+        let (mut state, first, second) = pending_focus_state();
+        assert!(state.focus_pane_in_workspace(1, second));
+        assert!(!state.workspaces[1].pane_state(first).unwrap().seen);
+        assert!(!state.workspaces[1].pane_state(second).unwrap().seen);
+    }
+
+    #[test]
+    fn acknowledge_on_focus_only_confirms_the_final_target_and_is_idempotent() {
+        let (mut state, first, second) = pending_focus_state();
+        state.acknowledge_on_pane_focus = true;
+        assert!(state.focus_pane_in_workspace(1, second));
+        assert!(!state.workspaces[1].pane_state(first).unwrap().seen);
+        assert!(state.workspaces[1].pane_state(second).unwrap().seen);
+        assert!(state.workspaces[1].pane_state(second).unwrap().completed);
+        assert!(!state.focus_pane_in_workspace(1, second));
+        assert!(state.workspaces[1].pane_state(second).unwrap().seen);
+        // A new completion on the already focused pane needs another focus action.
+        state.workspaces[1].pane_state_mut(second).unwrap().seen = false;
+        assert!(!state.focus_pane_in_workspace(1, second));
+        assert!(state.workspaces[1].pane_state(second).unwrap().seen);
+        assert!(!state.workspaces[1].pane_state(first).unwrap().seen);
+    }
+
+    #[test]
+    fn acknowledge_on_focus_tab_and_space_navigation_only_confirm_the_focused_pane() {
+        for by_space in [false, true] {
+            let (mut state, first, second) = pending_focus_state();
+            state.acknowledge_on_pane_focus = true;
+            if by_space {
+                state.switch_workspace(1);
+            } else {
+                assert!(state.switch_workspace_tab(1, 0));
+            }
+            assert!(state.workspaces[1].pane_state(first).unwrap().seen);
+            assert!(!state.workspaces[1].pane_state(second).unwrap().seen);
+        }
+    }
+
+    #[test]
+    fn acknowledge_on_focus_ignores_working_blocked_and_invalid_targets() {
+        for status in [
+            AgentState::Working,
+            AgentState::Blocked,
+            AgentState::Unknown,
+        ] {
+            let (mut state, first, second) = pending_focus_state();
+            state.acknowledge_on_pane_focus = true;
+            let id = state.workspaces[1]
+                .pane_state(second)
+                .unwrap()
+                .attached_terminal_id
+                .clone();
+            state.terminals.get_mut(&id).unwrap().state = status;
+            assert!(!state.focus_pane_in_workspace(99, second));
+            assert!(state.focus_pane_in_workspace(1, second));
+            assert!(!state.workspaces[1].pane_state(second).unwrap().seen);
+            assert!(!state.workspaces[1].pane_state(first).unwrap().seen);
+        }
+    }
+
+    #[test]
+    fn acknowledge_on_focus_keyboard_cycle_and_last_pane_confirm_the_target() {
+        let (mut state, first, second) = pending_focus_state();
+        state.switch_workspace(1);
+        state.acknowledge_on_pane_focus = true;
+        state.cycle_pane(false);
+        assert_eq!(state.workspaces[1].focused_pane_id(), Some(second));
+        assert!(state.workspaces[1].pane_state(second).unwrap().seen);
+        assert!(!state.workspaces[1].pane_state(first).unwrap().seen);
+        state.last_pane();
+        assert_eq!(state.workspaces[1].focused_pane_id(), Some(first));
+        assert!(state.workspaces[1].pane_state(first).unwrap().seen);
+    }
+
+    #[test]
+    fn acknowledge_on_focus_confirms_a_peeked_agent() {
+        let (mut state, first, second) = pending_focus_state();
+        state.set_down_agent_panes_in_tab(1, 0);
+        // Closing the space leaves these panes only in the detached registry.
+        state.workspaces.pop();
+        state.acknowledge_on_pane_focus = true;
+        state.peek_agent(second);
+        assert!(
+            state
+                .detached_agents
+                .iter()
+                .find(|agent| agent.pane_id == second)
+                .unwrap()
+                .pane
+                .seen
+        );
+        assert!(
+            !state
+                .detached_agents
+                .iter()
+                .find(|agent| agent.pane_id == first)
+                .unwrap()
+                .pane
+                .seen
+        );
+    }
+
     #[test]
     fn switch_workspace_leaves_the_done_marker_standing() {
         let mut state = app_with_workspaces(&["a", "b"]);
